@@ -5,13 +5,17 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math/big"
 	"net/http"
 	"net/url"
-	"strconv"
+	"os"
+	"slices"
+	"strings"
 	"time"
+	"vivino/models"
 )
 
 const baseURL string = "https://www.vivino.com/api"
@@ -21,6 +25,12 @@ type VivinoClient struct {
 	userAgent string
 	token     string
 }
+
+type VivinoResponse struct {
+	Reviews []models.VivinoRating `json:"reviews"`
+}
+
+var vivinoRating VivinoResponse
 
 func NewVivinoClient() *VivinoClient {
 	return &VivinoClient{
@@ -58,7 +68,7 @@ func getRandomUserAgent() string {
 	return userAgents[n.Int64()]
 }
 
-func (vc *VivinoClient) makeRequest(endpoint string, params map[string]string) (string, error) {
+func (vc *VivinoClient) makeRequest(endpoint string, params map[string]string) (VivinoResponse, error) {
 	fullURL := baseURL + endpoint
 
 	if len(params) > 0 {
@@ -73,14 +83,14 @@ func (vc *VivinoClient) makeRequest(endpoint string, params map[string]string) (
 
 	req, err := http.NewRequest("GET", fullURL, nil)
 	if err != nil {
-		return "", err
+		return vivinoRating, err
 	}
 
 	vc.setHeaders(req)
 
 	resp, err := vc.client.Do(req)
 	if err != nil {
-		return "", err
+		return vivinoRating, err
 	}
 	defer resp.Body.Close()
 
@@ -98,7 +108,7 @@ func (vc *VivinoClient) makeRequest(endpoint string, params map[string]string) (
 	if resp.Header.Get("Content-Encoding") == "gzip" {
 		gzipReader, err := gzip.NewReader(resp.Body)
 		if err != nil {
-			return "", fmt.Errorf("failed to create gzip reader: %v", err)
+			return vivinoRating, fmt.Errorf("failed to create gzip reader: %v", err)
 		}
 		defer gzipReader.Close()
 		reader = gzipReader
@@ -106,10 +116,14 @@ func (vc *VivinoClient) makeRequest(endpoint string, params map[string]string) (
 
 	body, err := io.ReadAll(reader)
 	if err != nil {
-		return "", err
+		return vivinoRating, err
 	}
 
-	return string(body), nil
+	if err = json.Unmarshal(body, &vivinoRating); err != nil {
+		return vivinoRating, err
+	}
+
+	return vivinoRating, nil
 }
 
 func (vc *VivinoClient) setHeaders(req *http.Request) {
@@ -124,23 +138,32 @@ func (vc *VivinoClient) setHeaders(req *http.Request) {
 	req.Header.Set("Cache-Control", "no-cache")
 }
 
-func generateSessionId() string {
-	timestamp := strconv.FormatInt(time.Now().UnixNano(), 16)
-	randomBytes := make([]byte, 8)
-	rand.Read(randomBytes)
-	return timestamp + hex.EncodeToString(randomBytes)
-}
-
 func main() {
+	args := os.Args[1:]
+
+	wineIdIndex := slices.IndexFunc(args, func(s string) bool { return strings.Split(s, "=")[0] == "--id" })
+	if wineIdIndex == -1 {
+		fmt.Println("No wine ID provided")
+		return
+	}
+	wineID := strings.Split(args[wineIdIndex], "=")[1]
+	fmt.Println("Wine ID provided")
+
+	yearIdIndex := slices.IndexFunc(args, func(s string) bool { return strings.Split(s, "=")[0] == "--year" })
+	if yearIdIndex == -1 {
+		fmt.Println("No year provided")
+		return
+	}
+	year := strings.Split(args[yearIdIndex], "=")[1]
+
 	client := NewVivinoClient()
 
-	wineID := "5548979"
 	endpoint := fmt.Sprintf("/wines/%s/reviews", wineID)
 
 	fmt.Printf("Fetching wine data for ID: %s\n", wineID)
 
 	response, err := client.makeRequest(endpoint, map[string]string{
-		"year":     "2024",
+		"year":     year,
 		"per_page": "1",
 	})
 
@@ -150,5 +173,5 @@ func main() {
 	}
 
 	fmt.Println("Response:")
-	fmt.Println(response)
+	fmt.Println(response.Reviews[0].Vintage.Statistics.RatingsAverage)
 }
