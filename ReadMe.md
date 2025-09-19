@@ -9,7 +9,7 @@ To prevent a user agent from being blocked, the client uses a random user agent 
 # Usage
 
 ```shell
-go run main.go
+go run vivino/main.go --id=WINE_ID --year=VINTAGE
 ```
 
 # License
